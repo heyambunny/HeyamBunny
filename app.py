@@ -31,11 +31,11 @@ class DataProcessor:
         """Parse date and time columns from the attendance file."""
         df_clean = df.copy()
         
-        # Parse date columns
+        # Parse date columns - FIXED: dayfirst=True for dd-mm-yyyy format
         date_columns = ['Attendance Date', 'In Date', 'Out Date']
         for col in date_columns:
             if col in df_clean.columns:
-                df_clean[col] = pd.to_datetime(df_clean[col], format='mixed', dayfirst=False, errors='coerce')
+                df_clean[col] = pd.to_datetime(df_clean[col], format='mixed', dayfirst=True, errors='coerce')
         
         # Parse time columns
         time_columns = ['In Time', 'Out Time', 'Shift Start Time', 'Shift End Time']
@@ -127,8 +127,6 @@ class AttendanceAnalyzer:
             'shift': records['Shift'].iloc[0] if 'Shift' in records.columns else None
         }
 
-#-------------------------------------------------------------------------------
-
     def check_compliance(self, in_time: Optional[time], out_time: Optional[time], 
                         is_senior: bool) -> Tuple[bool, bool, str]:
         """Check first half and second half compliance."""
@@ -169,8 +167,6 @@ class AttendanceAnalyzer:
         
         return first_half, second_half, status
     
-#-------------------------------------------------------------------------------   
-
     def get_employee_details(self, emp_code: str, departments: List[str], 
                             weekdays: List[str]) -> pd.DataFrame:
         """Get detailed date-wise attendance for one employee."""
