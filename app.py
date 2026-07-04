@@ -363,27 +363,58 @@ class ExcelExporter:
         return output.getvalue()
     
     @staticmethod
-    def export_detailed(detail_dict: Dict[str, pd.DataFrame]) -> bytes:
+    def export_detailed(detail_dict: Dict[str, pd.DataFrame], df_original: pd.DataFrame) -> bytes:
         """Export detailed reports with multiple sheets."""
         output = BytesIO()
         
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             for emp_code, df_detail in detail_dict.items():
+                emp_info = df_original[df_original['Employee Code'] == emp_code]
+                emp_name = emp_info['Employee Name'].iloc[0] if not emp_info.empty else ''
+                emp_dept = emp_info['Department'].iloc[0] if not emp_info.empty else ''
+                emp_desig = emp_info['Designation'].iloc[0] if not emp_info.empty else ''
+                
                 sheet_name = str(emp_code)[:31]
-                df_detail.to_excel(writer, sheet_name=sheet_name, index=False)
+                
+                # Write employee info at top
+                from openpyxl.styles import Font, PatternFill, Alignment
+                
+                info_data = [
+                    ['Employee Code:', emp_code],
+                    ['Employee Name:', emp_name],
+                    ['Department:', emp_dept],
+                    ['Designation:', emp_desig],
+                    ['', ''],
+                ]
+                
+                for i, row_data in enumerate(info_data, start=1):
+                    worksheet_temp = writer.sheets.get(sheet_name)
+                
+                # Create sheet with employee info first
+                info_df = pd.DataFrame(info_data)
+                info_df.to_excel(writer, sheet_name=sheet_name, index=False, header=False, startrow=0)
+                
+                # Write detail data below
+                df_detail.to_excel(writer, sheet_name=sheet_name, index=False, startrow=6)
                 
                 worksheet = writer.sheets[sheet_name]
                 
-                from openpyxl.styles import Font, PatternFill, Alignment
+                # Format employee info
+                bold_font = Font(bold=True, size=12)
+                for row in range(1, 5):
+                    worksheet.cell(row=row, column=1).font = bold_font
+                    worksheet.cell(row=row, column=2).font = Font(size=12)
                 
+                # Format detail headers (row 7)
                 header_fill = PatternFill(start_color='366092', end_color='366092', fill_type='solid')
                 header_font = Font(color='FFFFFF', bold=True, size=11)
                 
-                for cell in worksheet[1]:
+                for cell in worksheet[7]:
                     cell.fill = header_fill
                     cell.font = header_font
                     cell.alignment = Alignment(horizontal='center', vertical='center')
                 
+                # Auto-fit columns
                 for column in worksheet.columns:
                     max_length = 0
                     for cell in column:
@@ -635,7 +666,7 @@ def main():
             )
         with col2:
             if st.session_state.detailed_reports:
-                detailed_bytes = ExcelExporter.export_detailed(st.session_state.detailed_reports)
+                detailed_bytes = ExcelExporter.export_detailed(st.session_state.detailed_reports, df)
                 st.download_button(
                     "📥 Download All Details (Excel - Multiple Sheets)",
                     detailed_bytes,
