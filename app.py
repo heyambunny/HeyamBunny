@@ -126,32 +126,38 @@ class AttendanceAnalyzer:
             'working_hours': records['Working Hours'].iloc[0] if 'Working Hours' in records.columns else None,
             'shift': records['Shift'].iloc[0] if 'Shift' in records.columns else None
         }
-    
+
+#-------------------------------------------------------------------------------
+
     def check_compliance(self, in_time: Optional[time], out_time: Optional[time], 
                         is_senior: bool) -> Tuple[bool, bool, str]:
         """Check first half and second half compliance."""
         
         expected_in, expected_out = self.get_expected_times(is_senior)
         
-        # First half: Late arrival
-        first_half = False
-        if in_time is not None:
-            in_mins = in_time.hour * 60 + in_time.minute
-            expected_in_mins = expected_in.hour * 60 + expected_in.minute
-            first_half = in_mins > expected_in_mins
-        else:
-            first_half = True
+        # Helper to convert anything to minutes
+        def time_to_minutes(t):
+            if t is None:
+                return None
+            if isinstance(t, str):
+                try:
+                    parts = str(t).split(':')
+                    return int(parts[0]) * 60 + int(parts[1])
+                except:
+                    return None
+            try:
+                return t.hour * 60 + t.minute
+            except:
+                return None
         
-        # Second half: Early departure
-        second_half = False
-        if out_time is not None:
-            out_mins = out_time.hour * 60 + out_time.minute
-            expected_out_mins = expected_out.hour * 60 + expected_out.minute
-            second_half = out_mins < expected_out_mins
-        else:
-            second_half = True
+        in_mins = time_to_minutes(in_time)
+        out_mins = time_to_minutes(out_time)
+        expected_in_mins = time_to_minutes(expected_in)
+        expected_out_mins = time_to_minutes(expected_out)
         
-        # Determine status
+        first_half = True if in_mins is None else in_mins > expected_in_mins
+        second_half = True if out_mins is None else out_mins < expected_out_mins
+        
         if first_half and second_half:
             status = "Full Day Issue"
         elif first_half:
@@ -163,19 +169,18 @@ class AttendanceAnalyzer:
         
         return first_half, second_half, status
     
+#-------------------------------------------------------------------------------   
+
     def get_employee_details(self, emp_code: str, departments: List[str], 
                             weekdays: List[str]) -> pd.DataFrame:
         """Get detailed date-wise attendance for one employee."""
         
-        # Get ALL dates from the file for selected departments
         all_data = self.df[self.df['Department'].isin(departments)]
         all_dates = all_data['Attendance Date'].dropna().unique()
         
-        # Filter for selected weekdays
         weekday_nums = [self.WEEKDAY_MAP[w] for w in weekdays]
         relevant_dates = sorted([d for d in all_dates if d.weekday() in weekday_nums])
         
-        # Get employee info
         emp_data = self.df[self.df['Employee Code'] == emp_code]
         if emp_data.empty:
             return pd.DataFrame()
@@ -184,36 +189,45 @@ class AttendanceAnalyzer:
         is_senior = self.is_senior(emp_info.get('Designation', ''))
         expected_in, expected_out = self.get_expected_times(is_senior)
         
+        # Safe formatter
+        def safe_str(val):
+            if val is None:
+                return '-'
+            try:
+                return val.strftime('%H:%M')
+            except:
+                return str(val)
+        
+        def safe_date_str(val, fmt):
+            try:
+                return val.strftime(fmt)
+            except:
+                return str(val)[:10]
+        
         detail_rows = []
         
-        # Check EVERY date that exists in the file
         for date in relevant_dates:
             attendance = self.get_employee_attendance(emp_code, date)
             
             if attendance is None:
-                # No record for this date = ABSENT
                 detail_rows.append({
-                    'Date': date.strftime('%d-%b-%Y'),
-                    'Day': date.strftime('%A'),
+                    'Date': safe_date_str(date, '%d-%b-%Y'),
+                    'Day': safe_date_str(date, '%A'),
                     'Status': '❌ ABSENT',
                     'Punch In': '-',
                     'Punch Out': '-',
-                    'Expected In': expected_in.strftime('%H:%M'),
-                    'Expected Out': expected_out.strftime('%H:%M'),
+                    'Expected In': safe_str(expected_in),
+                    'Expected Out': safe_str(expected_out),
                     'Issue Type': 'Leave - No Record',
                     'Working Hours': '-',
                     'Shift': '-'
                 })
             else:
-                # Has record - check compliance
                 fh, sh, status = self.check_compliance(
                     attendance['in_time'], 
                     attendance['out_time'], 
                     is_senior
                 )
-                
-                in_time_str = attendance['in_time'].strftime('%H:%M') if attendance['in_time'] else 'Missing'
-                out_time_str = attendance['out_time'].strftime('%H:%M') if attendance['out_time'] else 'Missing'
                 
                 issue_type = []
                 if fh:
@@ -222,13 +236,13 @@ class AttendanceAnalyzer:
                     issue_type.append('Second Half (Early)')
                 
                 detail_rows.append({
-                    'Date': date.strftime('%d-%b-%Y'),
-                    'Day': date.strftime('%A'),
+                    'Date': safe_date_str(date, '%d-%b-%Y'),
+                    'Day': safe_date_str(date, '%A'),
                     'Status': f'✅ Present' if status == 'Present' else f'⚠️ {status}',
-                    'Punch In': in_time_str,
-                    'Punch Out': out_time_str,
-                    'Expected In': expected_in.strftime('%H:%M'),
-                    'Expected Out': expected_out.strftime('%H:%M'),
+                    'Punch In': safe_str(attendance['in_time']),
+                    'Punch Out': safe_str(attendance['out_time']),
+                    'Expected In': safe_str(expected_in),
+                    'Expected Out': safe_str(expected_out),
                     'Issue Type': ', '.join(issue_type) if issue_type else 'None',
                     'Working Hours': attendance.get('working_hours', '-'),
                     'Shift': attendance.get('shift', '-')
@@ -604,7 +618,7 @@ def main():
         
         # Summary table
         st.dataframe(
-            report.style.applymap(
+            report.style.map(
                 lambda x: 'background-color: #ffcccc; font-weight: bold' if x > 0 else '',
                 subset=['Total Issues']
             ),
@@ -666,7 +680,7 @@ def main():
                         return 'background-color: #d4edda; color: #155724'
                     return ''
                 
-                styled_detail = detail_df.style.applymap(color_status, subset=['Status'])
+                styled_detail = detail_df.style.map(color_status, subset=['Status'])
                 
                 st.dataframe(
                     styled_detail,
